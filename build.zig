@@ -7,6 +7,10 @@ pub const TargetDevice = struct {
     target: Lazy(std.Build.ResolvedTarget),
     device_path: std.Build.LazyPath,
 };
+const Device = struct {
+    cpu: std.Target.Cpu,
+    device_path: []const u8,
+};
 const CollectDevices = struct {
     step: std.Build.Step,
     target: Generated(std.Build.ResolvedTarget),
@@ -43,9 +47,50 @@ const CollectDevices = struct {
     fn makeFn(step: *std.Build.Step, node: *std.Progress.Node) !void {
         _ =node;
         const self = @fieldParentPtr(@This(), "step", step);
+        const argv =&.{self.flashtool.getPath(step.owner)};
+        
+        const arena = step.owner.allocator;
+
+        try step.handleChildProcUnsupported(null, argv);
+        try std.Build.Step.handleVerbose(step.owner, null, argv);
+
+        const result = std.ChildProcess.run(.{
+            .allocator = arena,
+            .argv = argv,
+        }) catch |err| return step.fail("unable to spawn {s}: {s}", .{ argv[0], @errorName(err) });
+
+        if (result.stderr.len > 0) {
+            try step.result_error_msgs.append(arena, result.stderr);
+        }
+
+        try step.handleChildProcessTerm(result.term, null, argv);
+
+        if (result.stderr.len != 0) {
+            return error.MakeFailed;
+        }
+
+        var iter = std.mem.splitScalar(u8, result.stdout, '\n');
+        var devices = std.ArrayList(Device).init(step.owner.allocator);
+        while (iter.next()) |line| {
+            var fields = std.mem.splitScalar(u8, line, ' ');
+            const arch_name = fields.next() orelse return step.fail("malformed device {s}", .{line});
+            const cpu_name = fields.next() orelse return step.fail("malformed device {s}", .{line});
+            _ = fields.next() orelse return step.fail("malformed device {s}", .{line});
+            const device_path = fields.rest();
+
+            const arch: std.Target.Cpu.Arch = std.meta.stringToEnum(std.Target.Cpu.Arch, arch_name) orelse return step.fail("malformed device {s}", .{line});
+            const cpu_model = arch.parseCpuModel(cpu_name) catch return step.fail("malformed device {s}", .{line});
+
+
+            devices.append(.{
+                .cpu = cpu_model.toCpu(arch),
+                .device_path = device_path,
+            }) catch @panic("OOM");
+        }
+        if (devices.items.len == 0) return step.fail("no devices found", .{});
+        const device = devices.items[0];
         self.target.value = step.owner.resolveTargetQuery(self.target_query);
-        // try step.evalChildProcess(&.{self.flashtool.getPath(step.owner)});
-        self.device_path.path = "\\\\.\\COM3";
+        self.device_path.path = device.device_path;
     }
 };
 

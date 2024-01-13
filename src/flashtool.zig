@@ -20,6 +20,7 @@ pub fn main() !void {
 
     var image_opt: ?[]const u8 = null;
     var port: firmware_upload.ArduinoUnoStkConnection = undefined;
+    var device_path: []const u8 = undefined;
     
     if (argv.len == 4 and std.mem.eql(u8, argv[1], "write")) {
 
@@ -37,9 +38,10 @@ pub fn main() !void {
             .handshake = .none,
         });
         port = try firmware_upload.ArduinoUnoStkConnection.open(handle);
+        device_path = argv[3];
     } else {
         port = while (try iterator.next()) |info| {
-            const handle = std.fs.openFileAbsolute(info.file_name, .{ .mode = .read_write }) catch return error.UnexpectedError;
+            const handle = std.fs.openFileAbsolute(info.file_name, .{ .mode = .read_write }) catch return error.CantOpenAvilableComPort;
 
             try serial.configureSerialPort(handle, .{
                 .baud_rate = 115200,
@@ -48,6 +50,7 @@ pub fn main() !void {
                 .stop_bits = .one,
                 .handshake = .none,
             });
+            device_path = info.file_name;
             break firmware_upload.ArduinoUnoStkConnection.open(handle) catch continue;
         } else return error.NoDeviceFound;
     }
@@ -74,11 +77,19 @@ pub fn main() !void {
     const signature: u32 = @intCast(std.mem.readPackedInt(u24, resp[1..4], 0, .big));
     if (signature != AT_MEGA_328P_SIGNATURE) return error.IncompatibleDevice;
     // std.debug.print("Detected ATmega328P\n", .{});
+    const cpu = std.Target.avr.cpu.atmega328p.toCpu(std.Target.Cpu.Arch.avr);
 
     const maj = try port.getparm(firmware_upload.Parm_STK_SW_MAJOR);
     const min = try port.getparm(firmware_upload.Parm_STK_SW_MINOR);
     const extparms: u8 = if ((maj > 1) or ((maj == 1) and (min >= 10))) 4 else 3;
     // std.debug.print("Software version: {}.{}\n", .{maj, min});
+    std.io.getStdOut().writer().print("{s} {s} {}.{} {s}", .{
+        @tagName(cpu.arch),
+        cpu.model.name,
+        maj,
+        min,
+        device_path,
+    }) catch @panic("OOM");
     if (image_opt) |image| {
         // Only obvious source for this information is avrdude.conf.
         try port.command(&[22]u8{
