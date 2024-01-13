@@ -1,129 +1,53 @@
 const std = @import("std");
 const firmware_upload = @import("firmware_upload");
 
-pub fn build(b: *std.Build) void {
-    _= b;
-    
-    // var iterator = try firmware_upload.serial.list();
-    // defer iterator.deinit();
-    // // var alloc = std.heap.GeneralPurposeAllocator(.{}) {};
-    // // const allocator = alloc.allocator();
-
-    // // const image = try std.fs.cwd().readFileAlloc(allocator, "../arduinodemo/zig-out/bin/main.bin", 1024 * 64);
-
-    // var port = while (try iterator.next()) |info| {
-    //     const port = std.fs.openFileAbsolute(info.file_name, .{ .mode = .read_write }) catch return error.UnexpectedError;
-
-    //     try firmware_upload.serial.configureSerialPort(port, .{
-    //         .baud_rate = 115200,
-    //         .word_size = 8,
-    //         .parity = .none,
-    //         .stop_bits = .one,
-    //         .handshake = .none,
-    //     });
-    //     break firmware_upload.ArduinoUnoStkConnection.open(port) catch continue;
-    // } else return error.NoDeviceFound;
-    // var resp: [64]u8 = undefined;
-
-    // try port.send(&.{firmware_upload.Cmnd_STK_READ_SIGN, firmware_upload.Sync_CRC_EOP});
-    // try port.recv(resp[0..5]);
-
-    // if (resp[0] == firmware_upload.Resp_STK_NOSYNC) {
-    //     std.debug.print("lost sync\n", .{});
-    //     try port.drain();
-    //     return;
-    // } else if (resp[0] != firmware_upload.Resp_STK_INSYNC) {
-    //     std.debug.print("unexpected response\n", .{});
-    //     try port.drain();
-    //     return;
-    // }
-    // if (resp[4] != firmware_upload.Resp_STK_OK) {
-    //     std.debug.print("failed to get ok\n", .{});
-    //     try port.drain();
-    //     return;
-    // }
-    // const signature: u32 = @intCast(std.mem.readPackedInt(u24, resp[1..4], 0, .big));
-    // if (signature != AT_MEGA_328P_SIGNATURE) return error.IncompatibleDevice;
-    // std.debug.print("Detected ATmega328P\n", .{});
-}
 const AT_MEGA_328P_SIGNATURE = 0x1E950F;
-
-
-    // const target = std.Build.resolveTargetQuery(b, .{
-    //     .cpu_arch = .avr,
-    //     .os_tag = .freestanding,
-    //     .abi = .eabi,
-
-    //     // TODO: Directly output to .bin when it's implemented
-    //     // .ofmt = .raw,
-
-    //     // .cpu_features_add = featureSet(&.{std.Target.avr.Feature.jmpcall}),
-    //     .cpu_features_add = std.Target.avr.cpu.atmega328p.features,
-    // });
+pub fn build(_: *std.Build) !void {}
 pub const TargetDevice = struct {
     target: Lazy(std.Build.ResolvedTarget),
+    device_path: std.Build.LazyPath,
 };
 const CollectDevices = struct {
     step: std.Build.Step,
     target: Generated(std.Build.ResolvedTarget),
-    resolved_target: std.Build.ResolvedTarget,
+    target_query: std.Target.Query,
     device_name: ?[]const u8,
+    device_path: std.Build.GeneratedFile,
 
-    // flashtool: std.Build.LazyPath,
-    fn init(b: *std.Build) *@This() {
-        const self = b.allocator.create(@This()) catch @panic("OOM");
+    flashtool: std.Build.LazyPath,
+    doing_upload_step: bool = false,
+    fn init(b: *FirmwareBuild) *@This() {
+        const self = b.host.allocator.create(@This()) catch @panic("OOM");
         self.* = .{
             .step = std.Build.Step.init(.{
                 .id = .custom,
                 .name = "collect devices",
                 .makeFn = CollectDevices.makeFn,
-                .owner = b,
+                .owner = b.host,
             }),
             .target = .{ .step = &self.step },
-            .resolved_target = b.standardTargetOptions(.{}),
-            // .flashtool = flashtool(b),
-            .device_name = b.option(
+            .target_query = b.host.standardTargetOptionsQueryOnly(.{}),
+            .device_name = b.host.option(
                 []const u8,
                 "device",
                 "The name of the device to upload to",
             ),
+            .device_path = .{
+                .step = &self.step,
+            },
+            .flashtool = b.flashtool_bin.getEmittedBin(),
         };
-        // self.flashtool.addStepDependencies(&self.step);
+        self.flashtool.addStepDependencies(&self.step);
         return self;
     }
     fn makeFn(step: *std.Build.Step, node: *std.Progress.Node) !void {
         _ =node;
         const self = @fieldParentPtr(@This(), "step", step);
-        self.target.value = self.resolved_target;
+        self.target.value = step.owner.resolveTargetQuery(self.target_query);
         // try step.evalChildProcess(&.{self.flashtool.getPath(step.owner)});
     }
 };
-pub fn standardTargetDeviceOptions(b: *std.Build, _: struct {}) TargetDevice {
-    const collect = CollectDevices.init(b);
-    return .{
-        .target = collect.target.getOutput(),
-    };
-}
 
-pub fn addUpload(b: *std.Build, _: TargetDevice, _: std.Build.LazyPath) void {
-    const upload = b.step("upload", "Upload firmware images to attached devices");
-    _ = upload;
-}
-var FlashToolBinaries = std.AutoHashMapUnmanaged(*std.Build, *std.Build.Step.Compile) {};
-fn flashtool(b: *std.Build) std.Build.LazyPath {
-    const slot = FlashToolBinaries.getOrPut(b.allocator, b) catch @panic("OOM");
-    if (!slot.found_existing) {
-        
-        slot.key_ptr.* = b;
-        slot.value_ptr.* = b.addExecutable(.{
-            .name = "flashtool",
-            .root_source_file = .{ .path = "src/flashtool.zig" },
-            .optimize = .ReleaseSafe,
-            .target = b.host,
-        });
-    }
-    return slot.value_ptr.*.getEmittedBin();
-}
 
 fn Generated(comptime T: type) type {
     return struct {
@@ -134,6 +58,54 @@ fn Generated(comptime T: type) type {
         }
     };
 }
+
+const DeferredCompile = struct {
+    step: std.Build.Step,
+    options: std.Build.Step.Compile.Options,
+    override_target: ?Lazy(std.Build.ResolvedTarget) = null,
+
+    out_bin: std.Build.GeneratedFile,
+    fn create(b: *std.Build, options: std.Build.Step.Compile.Options) *@This() {
+        const self = b.allocator.create(DeferredCompile) catch @panic("OOM");
+        self.* = .{
+            .step = std.Build.Step.init(.{
+                .id = .compile,
+                .name = "zig-build sketch ReleaseSmall",
+                .makeFn = DeferredCompile.makeFn,
+                .owner = b,
+            }),
+            .out_bin = .{
+                .step = &self.step,
+            },
+            .options = options,
+        };
+        return self;
+    }
+    fn setTarget(self: *DeferredCompile, target: Lazy(std.Build.ResolvedTarget)) void {
+        target.addStepDependencies(&self.step);
+        self.override_target = target;
+    }
+
+    fn makeFn(step: *std.Build.Step, node: *std.Progress.Node) !void {
+        const self = @fieldParentPtr(@This(), "step", step);
+
+        if (self.override_target) |target| self.options.root_module.target = target.get().*;
+        const sketch_elf_ =  std.Build.Step.Compile.create(step.owner, self.options);
+        const bin = sketch_elf_.getEmittedBin();
+
+        std.debug.assert(sketch_elf_.step.dependencies.items.len == 0);
+        sketch_elf_.step.make(node) catch |e| {
+            step.result_error_msgs.appendSlice(step.owner.allocator , sketch_elf_.step.result_error_msgs.items) catch @panic("OOM");
+            step.result_error_bundle = sketch_elf_.step.result_error_bundle;
+            return e;
+        };
+
+        self.out_bin.path = bin.getPath(step.owner);
+    }
+    pub fn getEmittedBin(self: *const DeferredCompile) std.Build.LazyPath {
+        return .{ .generated = &self.out_bin };
+    }
+};
 pub fn Lazy(comptime T: type) type {
     return union(enum) {
         immediate: T,
@@ -152,4 +124,105 @@ pub fn Lazy(comptime T: type) type {
             }
         }
     };
+}
+pub const FirmwareBuild = struct {
+    arduino_build: *std.Build,
+    host: *std.Build,
+
+    doing_upload_step: bool = false,
+    
+    flashtool_bin: *std.Build.Step.Compile,
+    fn init(b: *std.Build, comptime as_dependency: []const u8) @This() {
+        const arduino_build = b.dependency(as_dependency, .{}).builder;
+        var flashtool_bin =  arduino_build.addExecutable(.{
+            .name = "flashtool",
+            .root_source_file = .{ .path = "src/flashtool.zig" },
+            .optimize = .ReleaseSafe,
+            .target = b.host,
+        });
+        flashtool_bin.root_module.addImport("firmware_upload", arduino_build.dependency("firmware_upload", .{}).module("flash"));
+        return .{
+            .host = b,
+            .arduino_build = b,
+            .flashtool_bin = flashtool_bin,
+        };
+    }
+    pub fn addUpload(b: *FirmwareBuild, target: TargetDevice, firmware: std.Build.LazyPath) void {
+        var firmware_upload_exe = b.arduino_build.addRunArtifact(b.flashtool_bin);
+        firmware_upload_exe.addArg("write");
+        firmware_upload_exe.addFileArg(target.device_path);
+        firmware_upload_exe.addFileArg(firmware);
+        b.host.step("upload", "Upload firmware images to attached devices")
+            .dependOn(&firmware_upload_exe.step);
+    }
+    pub fn standardTargetDeviceOptions(b: *FirmwareBuild, _: struct {}) TargetDevice {
+        const collect = CollectDevices.init(b);
+        return .{
+            .target = collect.target.getOutput(),
+            .device_path = .{ .generated = &collect.device_path },
+        };
+    }
+    pub const ExecutableOptions = struct {
+        name: []const u8,
+        /// If you want the executable to run on the same computer as the one
+        /// building the package, pass the `host` field of the package's `Build`
+        /// instance.
+        target: ?std.Build.ResolvedTarget = null,
+        root_source_file: ?std.Build.LazyPath = null,
+        version: ?std.SemanticVersion = null,
+        optimize: std.builtin.OptimizeMode = .Debug,
+        code_model: std.builtin.CodeModel = .default,
+        linkage: ?std.Build.Step.Compile.Linkage = null,
+        max_rss: usize = 0,
+        link_libc: ?bool = null,
+        single_threaded: ?bool = null,
+        pic: ?bool = null,
+        strip: ?bool = null,
+        unwind_tables: ?bool = null,
+        omit_frame_pointer: ?bool = null,
+        sanitize_thread: ?bool = null,
+        error_tracing: ?bool = null,
+        use_llvm: ?bool = null,
+        use_lld: ?bool = null,
+        zig_lib_dir: ?std.Build.LazyPath = null,
+        /// Embed a `.manifest` file in the compilation if the object format supports it.
+        /// https://learn.microsoft.com/en-us/windows/win32/sbscs/manifest-files-reference
+        /// Manifest files must have the extension `.manifest`.
+        /// Can be set regardless of target. The `.manifest` file will be ignored
+        /// if the target object format does not support embedded manifests.
+        win32_manifest: ?std.Build.LazyPath = null,
+    };
+
+    pub fn addExecutable(b: *FirmwareBuild, options: ExecutableOptions, deferred: struct { target: ?Lazy(std.Build.ResolvedTarget) }) *DeferredCompile {
+        var compile = DeferredCompile.create(b.host, .{
+            .name = options.name,
+            .root_module = .{
+                .root_source_file = options.root_source_file,
+                .target = options.target,
+                .optimize = options.optimize,
+                .link_libc = options.link_libc,
+                .single_threaded = options.single_threaded,
+                .pic = options.pic,
+                .strip = options.strip,
+                .unwind_tables = options.unwind_tables,
+                .omit_frame_pointer = options.omit_frame_pointer,
+                .sanitize_thread = options.sanitize_thread,
+                .error_tracing = options.error_tracing,
+                .code_model = options.code_model,
+            },
+            .version = options.version,
+            .kind = .exe,
+            .linkage = options.linkage,
+            .max_rss = options.max_rss,
+            .use_llvm = options.use_llvm,
+            .use_lld = options.use_lld,
+            .zig_lib_dir = options.zig_lib_dir orelse b.host.zig_lib_dir,
+            .win32_manifest = options.win32_manifest,
+        });
+        if (deferred.target) |target| compile.setTarget(target);
+        return compile;
+    }
+};
+pub fn buildKit(b: *std.Build, comptime as_dependency: []const u8) FirmwareBuild {
+    return FirmwareBuild.init(b, as_dependency);
 }
