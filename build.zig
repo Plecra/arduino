@@ -45,6 +45,7 @@ const CollectDevices = struct {
         const self = @fieldParentPtr(@This(), "step", step);
         self.target.value = step.owner.resolveTargetQuery(self.target_query);
         // try step.evalChildProcess(&.{self.flashtool.getPath(step.owner)});
+        self.device_path.path = "\\\\.\\COM3";
     }
 };
 
@@ -150,8 +151,8 @@ pub const FirmwareBuild = struct {
     pub fn addUpload(b: *FirmwareBuild, target: TargetDevice, firmware: std.Build.LazyPath) void {
         var firmware_upload_exe = b.arduino_build.addRunArtifact(b.flashtool_bin);
         firmware_upload_exe.addArg("write");
-        firmware_upload_exe.addFileArg(target.device_path);
         firmware_upload_exe.addFileArg(firmware);
+        firmware_upload_exe.addFileArg(target.device_path);
         b.host.step("upload", "Upload firmware images to attached devices")
             .dependOn(&firmware_upload_exe.step);
     }
