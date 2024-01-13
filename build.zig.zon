@@ -4,7 +4,8 @@
 
     .dependencies = .{
         .firmware_upload = .{
-            .path = "../zig-firmware-upload",
+            .url = "https://github.com/Plecra/zig-firmware-upload/archive/b8b8ac97fffd49ed44a1b3195f56af353f7919a6.tar.gz",
+            .hash = "1220001a451be2f1cd8da070fb4d7fe6d6fb79ac2781388df676b1e4d1e8a3fee82d",
         },
     },
 
