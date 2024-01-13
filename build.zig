@@ -89,8 +89,25 @@ const CollectDevices = struct {
         }
         if (devices.items.len == 0) return step.fail("no devices found", .{});
         const device = devices.items[0];
-        self.target.value = step.owner.resolveTargetQuery(self.target_query);
+        self.target.value = self.resolveTargetQuery(self.target_query, device);
         self.device_path.path = device.device_path;
+    }
+
+    fn resolveTargetQuery(self: *CollectDevices, query_: std.Target.Query, device: Device) std.Build.ResolvedTarget {
+        var query = query_;
+        if (query.cpu_arch == null) query.cpu_arch = device.cpu.arch;
+        
+        switch (query.cpu_model) {
+            .explicit => {},
+            else => query.cpu_model = .{ .explicit= device.cpu.model },
+        }
+        if (query.os_tag == null) query.os_tag = .freestanding;
+        if (query.abi == null) query.abi = .eabi;
+        
+        return self.step.owner.resolveTargetQuery(query);
+    }
+    fn default_os(_: std.Target.Cpu) std.Target.Os.Tag {
+        return .freestanding;
     }
 };
 
