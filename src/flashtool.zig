@@ -3,6 +3,8 @@ const firmware_upload = @import("firmware_upload");
 const serial = firmware_upload.serial;
 
 const AT_MEGA_328P_SIGNATURE = 0x1E950F;
+// FIXME: We're missing some configuration of the programmer:
+// A bug stopped presenting when I flashed the mcu once with avrdude.
 
 
 // m328p ext parms
@@ -83,7 +85,7 @@ pub fn main() !void {
     const min = try port.getparm(firmware_upload.Parm_STK_SW_MINOR);
     const extparms: u8 = if ((maj > 1) or ((maj == 1) and (min >= 10))) 4 else 3;
     // std.debug.print("Software version: {}.{}\n", .{maj, min});
-    std.io.getStdOut().writer().print("{s} {s} {}.{} {s}", .{
+    std.io.getStdOut().writer().print("{s} {s} {}.{} {s}\n", .{
         @tagName(cpu.arch),
         cpu.model.name,
         maj,
@@ -149,7 +151,7 @@ pub fn main() !void {
                 page_size,
                 'F', // flags
             });
-            std.mem.copyForwards(u8, buf[4..], image[addr..@min(addr + page_size, image.len - addr)]);
+            std.mem.copyForwards(u8, buf[4..], image[addr..@min(addr + page_size, image.len)]);
             buf[4 + page_size] = firmware_upload.Sync_CRC_EOP;
             try port.command(&buf);
             // std.debug.print("Prog page ok\n", .{});

@@ -69,7 +69,7 @@ const CollectDevices = struct {
             return error.MakeFailed;
         }
 
-        var iter = std.mem.splitScalar(u8, result.stdout, '\n');
+        var iter = std.mem.splitScalar(u8, std.mem.trim(u8, result.stdout, "\n"), '\n');
         var devices = std.ArrayList(Device).init(step.owner.allocator);
         while (iter.next()) |line| {
             var fields = std.mem.splitScalar(u8, line, ' ');
@@ -102,7 +102,7 @@ const CollectDevices = struct {
             else => query.cpu_model = .{ .explicit= device.cpu.model },
         }
         if (query.os_tag == null) query.os_tag = .freestanding;
-        if (query.abi == null) query.abi = .eabi;
+        if (query.abi == null) query.abi = .none;
         
         return self.step.owner.resolveTargetQuery(query);
     }
@@ -128,6 +128,14 @@ const DeferredCompile = struct {
     override_target: ?Lazy(std.Build.ResolvedTarget) = null,
 
     out_bin: std.Build.GeneratedFile,
+    linker_script: ?std.Build.LazyPath = null,
+
+    pub fn setLinkerScript(self: *DeferredCompile, source: std.Build.LazyPath) void {
+        const b = self.step.owner;
+        self.linker_script = source.dupe(b);
+        source.addStepDependencies(&self.step);
+    }
+
     fn create(b: *std.Build, options: std.Build.Step.Compile.Options) *@This() {
         const self = b.allocator.create(DeferredCompile) catch @panic("OOM");
         self.* = .{
@@ -154,6 +162,9 @@ const DeferredCompile = struct {
 
         if (self.override_target) |target| self.options.root_module.target = target.get().*;
         const sketch_elf_ =  std.Build.Step.Compile.create(step.owner, self.options);
+        if (self.linker_script) |script| {
+            sketch_elf_.setLinkerScript(script);
+        }
         const bin = sketch_elf_.getEmittedBin();
 
         std.debug.assert(sketch_elf_.step.dependencies.items.len == 0);
