@@ -143,7 +143,7 @@ pub fn main() !void {
         var addr: u16 = 0;
 
         while (addr < image.len) : (addr += page_size) {
-            try port.loadaddr(addr);
+            try port.loadaddr(addr / 2);
             var buf = std.mem.zeroes([page_size + 5]u8);
             std.mem.copyForwards(u8, &buf, &.{
                 firmware_upload.Cmnd_STK_PROG_PAGE,
