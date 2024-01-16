@@ -232,7 +232,7 @@ pub const FirmwareBuild = struct {
     pub fn standardTargetDeviceOptions(b: *FirmwareBuild, _: struct {}) TargetDevice {
         const collect = CollectDevices.init(b);
         return .{
-            .target = collect.target.getOutput(),
+            .target = if (b.doing_upload_step) collect.target.getOutput() else .{ .immediate = b.host.resolveTargetQuery(collect.target_query) },
             .device_path = .{ .generated = &collect.device_path },
         };
     }
